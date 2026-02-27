@@ -51,6 +51,54 @@ Run the image with env vars (e.g. `KINDE_DOMAIN`) and port mapping:
 docker run --rm -e KINDE_DOMAIN=myapp -p 8080:8080 websocket-server:latest
 ```
 
+### Packaging the binary in another product's container (arm64 + amd64)
+
+Other products can ship the **websocket-server** binary inside their own image and support both **linux/amd64** and **linux/arm64** in either of these ways.
+
+**Option A: Copy the binary from our published image (no Rust build)**
+
+Use a multi-stage Dockerfile and copy the binary from the websocket-server image. When you build your image with `docker buildx build --platform linux/amd64,linux/arm64 ...`, Docker pulls the matching variant of the websocket-server image per platform, so you get the correct binary for each arch.
+
+Replace `docker.io/<DOCKERHUB_USERNAME>/<repo>:latest` with the actual image (e.g. from Docker Hub or your registry).
+
+```dockerfile
+# Stage 1: get the binary from the websocket-server image
+ARG WS_IMAGE=docker.io/<DOCKERHUB_USERNAME>/<repo>:latest
+FROM ${WS_IMAGE} AS ws
+
+# Stage 2: your product's image
+FROM debian:bookworm-slim
+# ... your app files, env, etc. ...
+COPY --from=ws /usr/local/bin/websocket-server /usr/local/bin/websocket-server
+# Run websocket-server as a sidecar, or your entrypoint that starts it
+```
+
+Build multi-arch and push:
+
+```bash
+docker buildx build --platform linux/amd64,linux/arm64 \
+  -t myproduct:latest --push .
+```
+
+**Option B: Build the binary from source in your Dockerfile**
+
+Build this repo inside your Dockerfile and copy the binary out. Use the same Dockerfile as this repo (or a stage that runs `cargo build --release`) and build your image with `--platform linux/amd64` or `--platform linux/arm64` so the binary matches the target. No cross-compilation needed.
+
+```dockerfile
+# Stage 1: build websocket-server (build with buildx for each platform)
+FROM rust:1-bookworm AS builder
+WORKDIR /app
+COPY . .   # or git clone this repo
+RUN cargo build --release
+
+# Stage 2: your product's image
+FROM debian:bookworm-slim
+COPY --from=builder /app/target/release/websocket-server /usr/local/bin/
+# ... rest of your image
+```
+
+Build for each architecture (or use buildx with `--platform linux/amd64,linux/arm64`; each platform builds natively in its own builder stage).
+
 ### GitHub Actions
 
 On every **push** and **pull_request** to `main`:
