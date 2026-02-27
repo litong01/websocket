@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Usage: ./check-and-test.sh [check|test|build]
+# Usage: ./check-and-test.sh [check|test|build|run|all]
 #   check  - run cargo check (default if no arg)
 #   test   - run cargo test
 #   build  - build container image (amd64 + arm64 via buildx)
+#   run    - run the app container with .env.local
 #   (no arg or "all") - run check then test
 set -euo pipefail
 
@@ -56,6 +57,29 @@ run_build() {
   fi
 }
 
+# Read PORT from .env.local (default 8080) for -p mapping
+get_port_from_env_file() {
+  local f="${1:-.env.local}"
+  if [[ -r "$f" ]]; then
+    local p
+    p=$(grep -E '^PORT=[0-9]+' "$f" 2>/dev/null | head -n1 | cut -d= -f2)
+    echo "${p:-8080}"
+  else
+    echo "8080"
+  fi
+}
+
+run_app() {
+  if [[ ! -f .env.local ]]; then
+    echo "Error: .env.local not found. Create it with at least KINDE_DOMAIN=..."
+    exit 1
+  fi
+  local port
+  port=$(get_port_from_env_file .env.local)
+  echo "==> Starting ${APP_IMAGE_NAME}:${APP_IMAGE_TAG} (env: .env.local, port ${port})..."
+  docker run -d --name "${APP_IMAGE_NAME}" --rm -p "${port}:${port}" --env-file .env.local "${APP_IMAGE_NAME}:${APP_IMAGE_TAG}"
+}
+
 case "${1:-all}" in
   check)
     run_check
@@ -70,6 +94,9 @@ case "${1:-all}" in
   build)
     run_build
     ;;
+  run)
+    run_app
+    ;;
   all|"")
     run_check
     echo ""
@@ -78,10 +105,11 @@ case "${1:-all}" in
     echo "==> Done (check + tests passed)."
     ;;
   *)
-    echo "Usage: $0 [check|test|build|all]"
+    echo "Usage: $0 [check|test|build|run|all]"
     echo "  check  - cargo check"
     echo "  test   - cargo test"
     echo "  build  - build container image (host arch, loaded). Set REGISTRY=<host> to push multi-arch."
+    echo "  run    - run the app container with .env.local (run 'build' first if needed)"
     echo "  all    - check then test (default)"
     exit 1
     ;;

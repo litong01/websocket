@@ -4,6 +4,8 @@ A WebSocket server built with **Tokio**, **Axum**, and **tokio-tungstenite**, wi
 
 - **Auth**: [Kinde.com](https://kinde.com) (JWT validation via JWKS)
 - **Rooms**: `room_name` + `password`; only authenticated users can join
+- **One room per connection (per device)**: A given WebSocket connection can be in at most one room at a time. Joining a different room (or sending **leave** then **join**) moves that connection to the new room. This is enforced by the data model (one `room_name` per connection) and does not add any extra checks or slowdown.  
+  **Same Kinde user on multiple devices:** Each device has its own connection and is treated as a separate participant for room membership. So one person logged in with the same Kinde account on two devices gets two connections; each can be in one room. They can both join the same room (and act as two participants there) or join different rooms. We do not restrict by Kinde user id—only by connection.
 - **Semantics**: If the room does not exist, it is created when the first user joins with a password. Once in a room, every message other than `join` is broadcast to everyone in the room (including the sender).
 
 ## Quick start
@@ -65,6 +67,22 @@ docker run --rm -e KINDE_DOMAIN=myapp -p 8080:8080 \
 - `nofile=65535:65535` sets both soft and hard limit for open files in the container. Adjust as needed (e.g. 32768 for moderate load).
 - On Kubernetes you can set `securityContext.ulimits` or ensure the pod/container has a higher limit if the default is low.
 - In production, also consider memory (each connection has buffer overhead) and CPU; scale horizontally (more replicas) if you need more than one node can handle.
+
+**Scaling to tens of thousands of users (horizontal and global)**  
+This server keeps **room state and broadcast in memory per process**. So a single instance can handle many connections (subject to ulimits and resources), but to scale out you need a strategy so that "rooms" and "broadcast" work across multiple instances.
+
+- **Single region, multiple replicas**
+  - **Option 1 – Sticky routing by room**  
+    Put a load balancer (or API gateway) in front of multiple replicas and route by **room name**: e.g. consistent hash of `room_name`, or a small directory service that maps `room_id` → server. Every connection that joins the same room is sent to the same replica. That way each room lives on one server; broadcast stays in-process. Limits: no single room can be larger than one replica’s capacity, and you must implement the router/directory.
+  - **Option 2 – Distributed pub-sub**  
+    Introduce a message broker (e.g. **Redis Pub/Sub**, or similar). When a user sends play/stop/etc., the server **publishes** the message to a channel keyed by room (e.g. `room:{room_name}`). Every replica **subscribes** to the channels for rooms it has local members in and **forwards** received messages to those WebSocket connections. Room membership is still per-replica (which connections are in which room on this node); only "broadcast" is shared via the broker. This requires code changes (replace in-memory broadcast with publish/subscribe to Redis). Scaling: add more replicas; no single-room limit.
+
+- **Global (multiple regions)**  
+  Run replicas in several regions behind a **global load balancer** (e.g. DNS + geo routing, or cloud LB). You can either:
+  - Keep **rooms regional**: route users to the nearest region; a "room" exists only in one region (same as Option 1 per region), or
+  - **Cross-region rooms**: use a **globally replicated pub-sub** (e.g. Redis with cross-region replication, or a managed pub/sub like AWS SNS, GCP Pub/Sub) so that a broadcast in one region is delivered to subscribers in all regions. Higher latency and operational complexity.
+
+**Summary:** For tens of thousands of users, use **multiple replicas** and either **room-based sticky routing** (simpler, room size limited by one node) or **Redis (or similar) pub-sub** for broadcast across nodes (more work, no per-room node limit). For global deployment, add multiple regions and choose regional vs cross-region rooms and the matching pub-sub setup.
 
 ### Packaging the binary in another product's container (arm64 + amd64)
 
