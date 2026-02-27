@@ -6,11 +6,17 @@ mod room;
 mod ws;
 
 use axum::{
-    extract::{Query, WebSocketUpgrade},
-    response::Response,
+    extract::{
+        ws::WebSocketUpgrade,
+        State,
+    },
+    http::StatusCode,
+    response::{IntoResponse, Response},
     routing::get,
     Router,
 };
+use axum_extra::TypedHeader;
+use headers::{authorization::Bearer, Authorization};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tower_http::cors::{Any, CorsLayer};
@@ -20,11 +26,6 @@ use crate::auth::KindeValidator;
 use crate::config::Config;
 use crate::room::RoomStore;
 use crate::ws::handle_socket;
-
-#[derive(serde::Deserialize)]
-struct WsQuery {
-    token: String,
-}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -45,9 +46,10 @@ async fn main() -> anyhow::Result<()> {
     let store = Arc::new(RwLock::new(RoomStore::new()));
 
     let app = Router::new()
+        .route("/time", get(time_handler))
         .route("/ws", get(ws_handler))
         .layer(CorsLayer::new().allow_origin(Any))
-        .with_state((validator, store));
+        .with_state((validator, store, config.idle_timeout_secs));
 
     let addr = format!("{}:{}", config.host, config.port);
     tracing::info!("listening on {}", addr);
@@ -58,14 +60,36 @@ async fn main() -> anyhow::Result<()> {
 
 async fn ws_handler(
     ws: WebSocketUpgrade,
-    Query(q): Query<WsQuery>,
-    axum::extract::State((validator, store)): axum::extract::State<(
+    auth: Option<TypedHeader<Authorization<Bearer>>>,
+    State((validator, store, idle_timeout_secs)): State<(
         Arc<KindeValidator>,
         Arc<RwLock<RoomStore>>,
+        u64,
     )>,
 ) -> Response {
-    let token = q.token;
+    let auth = match auth {
+        Some(TypedHeader(a)) => a,
+        None => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                "missing Authorization: Bearer <token> header",
+            )
+                .into_response();
+        }
+    };
+    let token = auth.token().to_string();
     ws.on_upgrade(move |socket| {
-        handle_socket(socket, token, validator, store)
+        handle_socket(socket, token, validator, store, idle_timeout_secs)
     })
+    .into_response()
+}
+
+/// Server time in UTC (ISO 8601). No auth required. Use for client clock sync.
+async fn time_handler() -> impl IntoResponse {
+    #[derive(serde::Serialize)]
+    struct TimeResponse {
+        utc: String,
+    }
+    let utc = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+    axum::Json(TimeResponse { utc })
 }

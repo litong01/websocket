@@ -6,6 +6,8 @@ description = "WebSocket server with Kinde auth and room model (name + password)
 
 [dependencies]
 axum = { version = "0.7", features = ["ws", "json"] }
+axum-extra = { version = "0.9", features = ["typed-header"] }
+headers = "0.4"
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
 tower-http = { version = "0.6", features = ["cors"] }
@@ -21,3 +23,4 @@ uuid = { version = "1.11", features = ["v4"] }
 thiserror = "2"
 anyhow = "1"
 reqwest = { version = "0.12", default-features = true }
+chrono = { version = "0.4", features = ["serde"] }

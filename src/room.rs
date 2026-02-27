@@ -43,11 +43,14 @@ impl Room {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct ConnectionId(pub Uuid);
 
-/// Per-connection state: which room (if any) and user id.
+/// Per-connection state: which room (if any), user id, and optional clock offset (client UTC vs server).
+/// offset_secs: add to client's startAt to get server time (server_time = client_time + offset_secs).
 pub struct ConnectionState {
     pub room_name: Option<String>,
     #[allow(dead_code)]
     pub user_id: String,
+    /// Clock offset in seconds: server_time = client_reported_utc + clock_offset_secs (set at join from clientUtc).
+    pub clock_offset_secs: Option<f64>,
 }
 
 /// In-memory store: rooms by name, and connection id -> state.
@@ -65,12 +68,14 @@ impl RoomStore {
     }
 
     /// Join or create a room. Returns the room's broadcast receiver and current member count.
+    /// If clock_offset_secs is Some, the connection's startAt times will be adjusted by the server when broadcasting.
     pub async fn join(
         &self,
         conn_id: ConnectionId,
         user_id: String,
         room_name: String,
         password: &str,
+        clock_offset_secs: Option<f64>,
     ) -> Result<(broadcast::Receiver<String>, usize), RoomError> {
         let room = {
             let mut rooms = self.rooms.write().await;
@@ -99,6 +104,7 @@ impl RoomStore {
             ConnectionState {
                 room_name: Some(room_name),
                 user_id,
+                clock_offset_secs,
             },
         );
 
@@ -109,6 +115,12 @@ impl RoomStore {
     pub async fn get_room(&self, conn_id: ConnectionId) -> Option<String> {
         let connections = self.connections.read().await;
         connections.get(&conn_id).and_then(|c| c.room_name.clone())
+    }
+
+    /// Get the clock offset for a connection (if set at join via clientUtc).
+    pub async fn get_clock_offset(&self, conn_id: ConnectionId) -> Option<f64> {
+        let connections = self.connections.read().await;
+        connections.get(&conn_id).and_then(|c| c.clock_offset_secs)
     }
 
     /// Broadcast a message to all members of the room the connection is in (including sender).
