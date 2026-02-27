@@ -1,0 +1,36 @@
+---
+description: Use Docker image scorelib-builder:latest for all Cargo commands (no local cargo)
+alwaysApply: true
+---
+
+# Rust / Cargo via Docker
+
+This project does **not** have Cargo installed on the host. All Cargo-related commands must be run inside the Docker image **scorelib-builder:latest**.
+
+## Rule
+
+- **Never** run `cargo` directly (e.g. `cargo build`, `cargo test`, `cargo run`). Cargo is not installed on the laptop.
+- **Always** run Cargo via Docker using the image **scorelib-builder:latest**.
+
+## Command pattern
+
+From the **project root** (workspace root), run:
+
+```bash
+docker run --rm -v "$(pwd)":/workspace -w /workspace scorelib-builder:latest cargo <command> [args]
+```
+
+Examples:
+
+- Build: `docker run --rm -v "$(pwd)":/workspace -w /workspace scorelib-builder:latest cargo build`
+- Test: `docker run --rm -v "$(pwd)":/workspace -w /workspace scorelib-builder:latest cargo test`
+- Run: `docker run --rm -v "$(pwd)":/workspace -w /workspace scorelib-builder:latest cargo run`
+- Check: `docker run --rm -v "$(pwd)":/workspace -w /workspace scorelib-builder:latest cargo check`
+- Clippy: `docker run --rm -v "$(pwd)":/workspace -w /workspace scorelib-builder:latest cargo clippy`
+- Fmt: `docker run --rm -v "$(pwd)":/workspace -w /workspace scorelib-builder:latest cargo fmt`
+
+## Notes
+
+- Ensure the shell is in the project root before running (e.g. `cd /Users/tli/hl/src/github.com/websocket` or the workspace path).
+- For long-running commands (e.g. `cargo run`), use the same pattern; add `-p 8080:8080` (or the app port) to `docker run` if the app listens on a port and you need to reach it from the host.
+- When running tests or builds that need network (e.g. fetching crates), use `docker run` with `--network host` or ensure the image can reach the internet by default.

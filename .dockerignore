@@ -1,0 +1,19 @@
+# Git and local artifacts
+.git
+.gitignore
+.dockerignore
+
+# Build outputs (we build inside the image)
+target
+
+# IDE and env (not needed in image)
+.env
+.env.*
+!.env.example
+*.swp
+.cursor
+
+# Scripts and docs (not needed at runtime)
+check-and-test.sh
+README.md
+*.md
