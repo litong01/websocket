@@ -51,6 +51,21 @@ Run the image with env vars (e.g. `KINDE_DOMAIN`) and port mapping:
 docker run --rm -e KINDE_DOMAIN=myapp -p 8080:8080 websocket-server:latest
 ```
 
+**Connection capacity and open-file limits**  
+The server does not enforce a maximum number of connections. The main limit is the **per-process open file descriptor limit** (each TCP/WebSocket connection uses file descriptors). The default in many environments is 1024 (soft), which caps you at roughly hundreds of concurrent connections.
+
+To support more connections, raise the limit when running the container. For example, to allow up to 65k open files (and thus many thousands of connections):
+
+```bash
+docker run --rm -e KINDE_DOMAIN=myapp -p 8080:8080 \
+  --ulimit nofile=65535:65535 \
+  websocket-server:latest
+```
+
+- `nofile=65535:65535` sets both soft and hard limit for open files in the container. Adjust as needed (e.g. 32768 for moderate load).
+- On Kubernetes you can set `securityContext.ulimits` or ensure the pod/container has a higher limit if the default is low.
+- In production, also consider memory (each connection has buffer overhead) and CPU; scale horizontally (more replicas) if you need more than one node can handle.
+
 ### Packaging the binary in another product's container (arm64 + amd64)
 
 Other products can ship the **websocket-server** binary inside their own image and support both **linux/amd64** and **linux/arm64** in either of these ways.
